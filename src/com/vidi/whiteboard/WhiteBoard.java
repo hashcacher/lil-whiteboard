@@ -11,6 +11,8 @@ import java.util.List;
 
 import processing.core.*;
 
+//TODO: Read the log as a stream instead of buffered; don't hold all the thumbnails in memory
+
 //TODO: Replace all new Color(hexcolor) with 0xff0000 | hexcolor
 //TODO: stop the thumbnails from scrolling too far
 //TODO: fix thumbnail reload color bugs
