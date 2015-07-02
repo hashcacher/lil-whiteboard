@@ -2,12 +2,22 @@ package com.vidi.whiteboard;
 
 import java.awt.Color;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Stream;
+
+import javax.swing.text.StyledEditorKit.FontSizeAction;
 
 import processing.core.*;
 
@@ -35,8 +45,8 @@ public class WhiteBoard extends PApplet{
 	  
 	  //buttons
 	  //button events are handled in mouseclicked
-	  float saveX = swatchSize+40, saveY = 90, saveW = 345, saveH = 50;
-	  float clearX = swatchSize+40, clearY = 20, clearW = 345, clearH = 50;
+	  float saveX = swatchSize+140, saveY = 120, saveW = 345, saveH = 50;
+	  float clearX = swatchSize+140, clearY = 50, clearW = 300, clearH = 50;
 	  
 	  int[] colors = {
 	      0x9e0142,
@@ -56,12 +66,15 @@ public class WhiteBoard extends PApplet{
 	  
 	  String logFilePath = "log.txt";
 	  private PrintWriter pw;
-	  int logfileLines = 0; 
+	  int currentLogLine = 0; 
+	  int logFileTotalLines = 0; 
 	  
 	  int currentActionCounter = 0;
 	  List<Thumbnail> thumbnails;
 	  float thumbnailsScale = .1f;
 	  float thumbnailsX;
+	  float thumbnailsW;
+	  float thumbnailsH;
 	  float thumbnailsMouseOffset;
 	  float deltaOffsetX = 0;
 	  boolean dragging = false;
@@ -75,6 +88,7 @@ public class WhiteBoard extends PApplet{
 	    //creates the applet window
 	    size(displayWidth, displayHeight-100);
 	    
+	    
 	    //white
 	    background(255);
 	    
@@ -84,11 +98,20 @@ public class WhiteBoard extends PApplet{
 	    //how big each color square will be
 	    swatchSize = (this.height - colors.length*swatchPadding) / colors.length;
 	    
+	    //set the size of thumbnails
+	    thumbnailsW = this.width*thumbnailsScale;
+	    thumbnailsH = this.height*thumbnailsScale;
+
 	    //create the history thumbnails from the log file
 	    thumbnails = new ArrayList<Thumbnail>();
 	    thumbnails.addAll(createThumbnails());
-	    int nThumbnails = thumbnails.size();
+
+	    int nThumbnails = thumbnails.size(); //this is the same as logFileTotalLines =P
+	    //set the offset of the thumbnails
 	    thumbnailsX = this.width - (this.width*thumbnailsScale) * (nThumbnails + 1.5f); 
+
+	    
+	    //start up the current thumbnail
 	    currentThumbnail = createGraphics((int)(this.width*thumbnailsScale), (int)(this.height*thumbnailsScale));
 	    currentThumbnail.beginDraw();
 	  }
@@ -99,7 +122,7 @@ public class WhiteBoard extends PApplet{
 			  textAlign(CENTER);
 			  text("You can restore sketches here, after you drawn something and pressed clear.", 
 					  this.width/2, this.height - this.height*thumbnailsScale/2);
-			  textAlign(CORNER);
+			  textAlign(LEFT);
 		  }
 		  
 		  //drag
@@ -164,12 +187,16 @@ public class WhiteBoard extends PApplet{
 	  
 	  private void drawArrow()
 	  {
+		  
 		  strokeWeight(1);
 		  int arrowTip = 10;
 		  float y = this.height - this.height*thumbnailsScale - arrowTip;
 		  line(this.width/3,y, this.width*2/3, y);
 		  line(this.width*2/3 - arrowTip,y-arrowTip, this.width*2/3, y);
 		  line(this.width*2/3 - arrowTip,y+arrowTip, this.width*2/3, y);
+
+		  textSize(16);
+		  text("drag me", this.width/2, y - 10);
 	  }
 	  
 	  /**
@@ -179,7 +206,7 @@ public class WhiteBoard extends PApplet{
 	  {
 	    fill(0);
 	    textSize(48);
-	    text("save and clear", x + this.width*.004f, y + this.height*.03f);
+	    text("save and clear", x, y);
 	  }
 	  
 	  /**
@@ -189,8 +216,7 @@ public class WhiteBoard extends PApplet{
 	  {
 		  fill(20);
 		  textSize(48);
-		  text("screenshot", x + this.width*.004f, y + this.height*.03f);
-		  
+		  text("screenshot", x , y);
 		  //TODO: show the user where it's saved
 	  }
 	  
@@ -215,13 +241,13 @@ public class WhiteBoard extends PApplet{
 	    }
 	    
 	    //screenshots
-	    else if(mouseX > saveX && mouseX < saveY + saveW && mouseY > saveY && mouseY < saveY + saveH)
+	    else if(mouseX > saveX && mouseX < saveX + saveW && mouseY > saveY && mouseY < saveY + saveH)
 	      {
 	    	saveFrame("whiteboard-######.jpg");
 	      }
 	    
 	    //clear screen
-	    else if(mouseX > clearX && mouseX < clearY + clearW && mouseY > clearY && mouseY < clearY + clearH)
+	    else if(mouseX > clearX && mouseX < clearX + clearW && mouseY > clearY && mouseY < clearY + clearH)
 	      {
 	        background(255);
 	        logClear();
@@ -268,7 +294,7 @@ public class WhiteBoard extends PApplet{
 	  private void drawThumbnails()
 	  {
 	    float curX = thumbnailsX;
-	    float y = this.height - this.height*thumbnailsScale;
+	    float y = this.height - thumbnailsH;
 	    
 	    int n = thumbnails.size();
 	    int start = n >= 9 ? n - 9 : n;
@@ -290,9 +316,10 @@ public class WhiteBoard extends PApplet{
 	  
 	  /**
 	   * Log format
-	   * clear means clear
+	   * each drawing on its own line
+	   * each instruction separated by spacebar
 	   * -xxxxxxx are colors
-	   * +yyyyyy are initial strokes
+	   * +yyy,yyy are initial strokes
 	   * zzzz,zzzz are points connected to previous points
 	   */
 	  private void initLogger(String path) {
@@ -307,152 +334,64 @@ public class WhiteBoard extends PApplet{
 	  }
 	  private void log(int x, int y)
 	  {
-	    pw.println(x + "," + y);
+	    pw.print(x + "," + y + " ");
 	    currentThumbnail.line(prevX*thumbnailsScale,prevY*thumbnailsScale,x*thumbnailsScale,y*thumbnailsScale);
 	    currentActionCounter++;
 	  }
 	  private void log(boolean start, int x, int y)
 	  {
-	    pw.println("+" + x + "," + y);
+	    pw.print("+" + x + "," + y + " ");
 	    currentThumbnail.point(x*thumbnailsScale,y*thumbnailsScale);
 	    currentActionCounter++;
 	  }
 	  private void log(Color c)
 	  {
-	    pw.println(c.getRGB());
+	    pw.print(c.getRGB() + " ");
 	    currentThumbnail.stroke(c.getRGB());
 	    currentActionCounter++;
 	  }
 	  private void logClear()
 	  {
-		sketchLoaded = false;
 	    if(currentActionCounter <= 1)
 	      return;
 	    
-	    //this is done too many times
-	    pw.println("clear");
+	    pw.println("");
 	    pw.flush();
 	  
+	    //need to enddraw before drawing PGraphics
 	    currentThumbnail.endDraw();
-	    thumbnails.add(new Thumbnail(currentThumbnail, logfileLines));
-	    currentThumbnail = createGraphics((int)(this.width*thumbnailsScale), (int)(this.height*thumbnailsScale));
+	    
+	    //save the current thumbnail
+	    thumbnails.add(new Thumbnail(currentThumbnail, logFileTotalLines++));
+	    
+	    //make a new current thumbnail
+	    currentThumbnail = createGraphics((int)thumbnailsW, (int)thumbnailsH);
 	    currentThumbnail.stroke(currentColor.getRGB());
+	    
+	    //start the new sketch with our current color
 	    log(currentColor.getRGB());
-	    logfileLines += currentActionCounter;
+	    
+	    //reset action counter
 	    currentActionCounter = 0;
+	    
+	    //move the thumbnails to the end
 	    thumbnailsX = this.width - (this.width*thumbnailsScale) * (thumbnails.size() + 1.5f); 
+	    
+	    //redraw some stuff
+	    drawArrow();
+	    drawColorPicker();
 	  }
 	  
 	  /**
 	   * load a thumbnail the user clicked on
 	   * here we draw it again to the screen
-	   * and also load it in the currentThumbnail :-)
+	   * and also load it in the currentThumbnail	 :-)
 	   * We also re-log it so it gets saved.
 	   * 
 	   * @param number: which thumbnail to load
 	   */
 	  private void loadThumbnail(int number)
 	  {
-		  println(currentActionCounter);
-		  println(sketchLoaded);
-		  
-		  //clear the current drawing
-		  logClear();
-
-		  //load the log
-		  String []lines = loadStrings(logFilePath);
-		  
-		  //we need to find the nth drawing
-		  int clearCounter = 0;
-		  int i = 0;
-		  String curLine = lines[0];
-		  while(i < lines.length && clearCounter < number)
-		  {
-			  if(curLine.equals("clear"))
-				  clearCounter++;
-			  curLine = lines[++i];
-		  }
-		  
-		  Color col = Color.black;
-		    logfileLines = lines.length;
-		    if(curLine.equals("clear"))
-		    {
-		    	System.err.println("corrupt log file");
-		    	return;
-		    }
-		    
-		    //clear the screens 
-		    background(255);
-		    currentThumbnail.background(255);
-		    
-		    stroke(col.getRGB());
-		    log(col);
-		    //color
-		      while(curLine.charAt(0) == '-')
-		      {
-		        int num = Integer.parseInt(curLine);
-		        col = new Color(num);
-		        stroke(col.getRGB());
-		        log(col);
-		        curLine = lines[i++];
-		      }
-		    
-		    
-	      //get a line from the log file
-	      prevX = Integer.parseInt(curLine.split(",")[0]);
-	      prevY = Integer.parseInt(curLine.split(",")[1]);
-	      while(i < lines.length && !lines[i].equals("clear"))
-	      {
-	        curLine = lines[i++];
-	        
-	        currentThumbnail.strokeWeight(1);
-      	  	strokeWeight(strokeWeight);
-	        
-	        //if it's a color
-	        if(curLine.charAt(0) == '-')
-	        {
-	          int num = Integer.parseInt(curLine);
-	          col = new Color(num);
-	          stroke(col.getRGB());
-	          currentThumbnail.stroke(col.getRGB());
-	          if(col == col.white)
-	          {
-	            currentThumbnail.strokeWeight(7.5f);
-	            strokeWeight(strokeWeight*10);
-	          }
-	          log(col);
-	        }
-	        
-	        //if it's a beginning stroke
-	        else if(curLine.charAt(0) == '+')
-	        {
-	          String []split = curLine.split(",");
-	          int nextX = Integer.parseInt(split[0]), nextY = Integer.parseInt(split[1]);
-	          
-	          //draw the starting point
-	          //do it for the main screen
-	          ellipse(nextX,nextY,strokeWeight/4,strokeWeight/4);
-	          
-	          log(true, nextX, nextY);
-	          
-	          prevX = nextX;
-	          prevY = nextY;
-	        }
-
-	        //draw a line
-	        else 
-	        {
-	          String []split = curLine.split(",");
-	          int nextX = Integer.parseInt(split[0]), nextY = Integer.parseInt(split[1]);
-	          
-	          
-	          line(prevX,prevY,nextX, nextY);
-	          log(nextX, nextY);
-	          prevX = nextX;
-	          prevY = nextY;
-	        }
-	      }
-	      sketchLoaded = true;
 	  }
 
 	  /**
@@ -461,92 +400,90 @@ public class WhiteBoard extends PApplet{
 	   * @return A list of all the thumbnails in chronological order
 	   */
 	  private List<Thumbnail> createThumbnails() {
-	    List<Thumbnail> thumbnails = new ArrayList<Thumbnail>();
-	    
-	    String []lines = loadStrings(logFilePath);
-	    logfileLines = lines.length;
-	    int i = 0;
-	    
-	    final int qualityThreshold = 10;
-	    while(i < lines.length)
-	    {
-	      if(lines[i].equals("clear"))
-	      {
-	        i++;
-	        continue;
-	      }
-	        
-	      //make a new buffer to draw to
-	      PGraphics pg = createGraphics((int)(this.width*thumbnailsScale), (int)(this.height*thumbnailsScale));
-	      
-	      //Thumbnail object keeps track of which line the thumbnail starts at so we can go back and redraw it 
-	      Thumbnail tn = new Thumbnail(pg,i);
-	      Color col = Color.black;
-	      
-	      pg.beginDraw();
-	      pg.stroke(col.getRGB());
-	      
-	      String curLine = lines[i++];
-	      if(curLine.charAt(0) == '-')
-	      {
-	        int num = Integer.parseInt(curLine);
-	        col = new Color(num);
-	        pg.stroke(col.getRGB());
-	        continue;
-	      }
-	        
-	      //get a line from the log file
-	      int prevX = Integer.parseInt(curLine.split(",")[0]), prevY = Integer.parseInt(curLine.split(",")[1]);
-	      int counter = 0;
-	      while(i < lines.length && !lines[i].equals("clear"))
-	      {
-	        curLine = lines[i++];
-	        
-	        pg.strokeWeight(1);
-	        
-	        //if it's a color
-	        if(curLine.charAt(0) == '-')
-	        {
-	          int num = Integer.parseInt(curLine);
-	          col = new Color(num);
-	          pg.stroke(col.getRGB());
-	          if(col == col.white)
-	            pg.strokeWeight(7.5f);
-	        }
-	        
-	        //if it's a beginning stroke
-	        else if(curLine.charAt(0) == '+')
-	        {
-	          String []split = curLine.split(",");
-	          int nextX = Integer.parseInt(split[0]), nextY = Integer.parseInt(split[1]);
-	          
-	          //draw the starting point
-	          pg.point(nextX,nextY);
-	          prevX = nextX;
-	          prevY = nextY;
-	          counter++;
-	        }
+		  List<Thumbnail> thumbnails = new ArrayList<Thumbnail>();
+		  
+		  //read the log file
+		  Path path = Paths.get(logFilePath);
+		    //The stream hence file will also be closed here
+		    try(Stream<String> lines = Files.lines(path)){
+		        lines.forEachOrdered(
+		        		e -> thumbnails.add(createThumbnail(readLogLineCreateThumbnail(e))));
+		    } catch (IOException e1) {
+				e1.printStackTrace();
+			}
+		  
+		  return thumbnails;
+	  }
+	  
+	  private Thumbnail createThumbnail(PGraphics pg)
+	  {
+		  return new Thumbnail(pg, logFileTotalLines++);
+	  }
+	  
+	  private PGraphics readLogLineCreateThumbnail(String line)
+	  {
+		  final float normStrokeWeight = 1;
+		  final float whiteStrokeWeight = 7.5f;
+		  
+		  PGraphics pg = createGraphics((int)thumbnailsW, (int)thumbnailsH);
+		  pg.beginDraw();
+		  
+		  String []pieces = line.split(" ");
+		  float prevX = 0, prevY = 0;
+		  for(String instruction : pieces)
+		  {
+			  if(instruction.length() == 0)
+				  continue;
+			  
+			  //color
+			  if(instruction.charAt(0) == '-' || instruction.charAt(0) == '0')
+			  {
+				  //add alpha to the color
+				  int color = fixColor(Integer.parseInt(instruction));
+				  
+				  //eraser is bigger
+				  if(color == 0xffffff)
+					  pg.strokeWeight(whiteStrokeWeight);
+				  else
+					  pg.strokeWeight(normStrokeWeight);
 
-	        //draw a line
-	        else 
-	        {
-	          String []split = curLine.split(",");
-	          int nextX = Integer.parseInt(split[0]), nextY = Integer.parseInt(split[1]);
-	          
-	          pg.line(prevX*thumbnailsScale,prevY*thumbnailsScale,nextX*thumbnailsScale, nextY*thumbnailsScale);
-	          prevX = nextX;
-	          prevY = nextY;
-	          counter++;
-	        }
-	      }
-	      pg.endDraw();
-	      if(counter > qualityThreshold)
-	        thumbnails.add(tn);
-	    }
-	    
-	    return thumbnails;
+				  //finally, set the stroke
+				  pg.stroke(color);
+			  }
+			  
+			  //starting stroke
+			  else if(instruction.charAt(0) == '+')
+			  {
+				  String[] xandy = instruction.split(",");
+				  prevX = Integer.parseInt(xandy[0]) * thumbnailsScale;
+				  prevY = Integer.parseInt(xandy[1]) * thumbnailsScale;
+				  point(prevX,prevY);
+			  }
+			  
+			  else
+			  {
+				  String[] xandy = instruction.split(",");
+				  float x = Integer.parseInt(xandy[0]) * thumbnailsScale;
+				  float y = Integer.parseInt(xandy[1]) * thumbnailsScale;
+				  
+				  //connect to previous point
+				  line(prevX, prevY, x, y);
+				  
+				  //current point is now the previous point
+				  prevX = x;
+				  prevY = y;
+			  }
+		  }
+		  
+		  pg.endDraw();
+		  return pg;
 	  }
 
+	  private int fixColor(int col)
+	  {
+		  return 0xff0000 | col;
+	  }
+	  
 	  public void mouseReleased()
 	  {
 	    mouseUp = true;
